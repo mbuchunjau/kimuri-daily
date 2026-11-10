@@ -1,0 +1,7 @@
+{
+  "name": "kimuri-daily",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Kimuri daily stock and cash entry app",
+  "engines": { "node": ">=18" }
+}

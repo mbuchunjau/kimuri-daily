@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#12513a">
+<title>Kimuri – summaries</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@800;900&family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<style>body { padding-bottom: calc(env(safe-area-inset-bottom) + 40px); }</style>
+</head>
+<body>
+
+<div id="lock">
+  <div class="lockbox">
+    <h1 class="wordmark">KIMURI</h1>
+    <p>Enter the PIN to open the till sheet.</p>
+    <input type="password" id="pin" inputmode="numeric" autocomplete="current-password" aria-label="PIN">
+    <button id="unlock" type="button">Open</button>
+    <div class="err" id="lockErr" role="alert"></div>
+  </div>
+</div>
+
+<div class="awning-wrap"><div class="awning" aria-hidden="true"></div></div>
+
+<div class="masthead">
+  <div>
+    <h1 class="wordmark">KIMURI</h1>
+    <p class="tagline">Summaries and Telegram reports</p>
+  </div>
+</div>
+
+<nav class="nav" aria-label="Pages">
+  <a href="/">Daily entry</a>
+  <a href="/summary" aria-current="page">Summaries</a>
+</nav>
+
+<main>
+  <h2>Daily summary</h2>
+  <label class="f" for="day">Completed day</label>
+  <select id="day"><option>Loading…</option></select>
+  <div class="out" id="dayOut" aria-live="polite">Pick a day to preview its summary.</div>
+  <div class="btnrow one">
+    <button type="button" class="primary" id="sendDay">Send this day to Telegram</button>
+  </div>
+
+  <hr class="sep">
+
+  <h2>Period report</h2>
+  <div class="grid">
+    <div><label class="f" for="from">From</label><input type="date" id="from"></div>
+    <div><label class="f" for="to">To</label><input type="date" id="to"></div>
+  </div>
+  <div class="btnrow">
+    <button type="button" id="prevRange">Preview range</button>
+    <button type="button" id="prevLast">Preview last 15 days</button>
+  </div>
+  <div class="out" id="repOut" aria-live="polite">Choose dates, or preview the last 15 days.</div>
+  <div class="btnrow">
+    <button type="button" class="primary" id="sendRange">Send range</button>
+    <button type="button" class="primary" id="sendLast">Send last 15 days</button>
+  </div>
+
+  <hr class="sep">
+
+  <h2>Catch up</h2>
+  <div class="btnrow one">
+    <button type="button" class="gold" id="sendUnsent">Send all unsent days</button>
+  </div>
+
+  <div id="msg" role="status"></div>
+</main>
+
+<script src="/app.js"></script>
+<script>
+(function () {
+  var K = window.Kimuri;
+  var $ = function (id) { return document.getElementById(id); };
+  var buttons = ['sendDay', 'prevRange', 'prevLast', 'sendRange', 'sendLast', 'sendUnsent'];
+
+  function show(kind, text) {
+    var m = $('msg'); m.className = kind; m.textContent = text;
+    if (kind === 'ok') setTimeout(function () { if (m.textContent === text) m.className = ''; }, 7000);
+  }
+  function busy(on) { buttons.forEach(function (id) { $(id).disabled = on; }); $('day').disabled = on; }
+  function fail(e) { show('err', e.message); }
+
+  function loadDays() {
+    return K.api('listDays').then(function (days) {
+      var sel = $('day');
+      if (!days.length) { sel.innerHTML = '<option value="">No completed days yet</option>'; return; }
+      sel.innerHTML = days.map(function (d) {
+        var v = d.variance < 0 ? 'short ' + K.fmt(-d.variance) : d.variance > 0 ? 'over ' + K.fmt(d.variance) : 'balanced';
+        return '<option value="' + K.esc(d.iso) + '">' + K.esc(K.niceDate(d.iso)) + ' – ' + v + (d.sent ? '' : ' (not sent)') + '</option>';
+      }).join('');
+      $('to').value = days[0].iso;
+      $('from').value = days[Math.min(days.length, 15) - 1].iso;
+      previewDay();
+    });
+  }
+
+  function previewDay() {
+    var iso = $('day').value;
+    if (!iso) return;
+    $('dayOut').textContent = 'Loading…';
+    K.api('getSummary', { iso: iso }).then(function (t) { $('dayOut').textContent = K.plain(t); }).catch(fail);
+  }
+
+  function report(send, useRange) {
+    var data = { send: send };
+    if (useRange) {
+      if (!$('from').value || !$('to').value) { show('err', 'Pick both dates.'); return; }
+      data.start = $('from').value; data.end = $('to').value;
+    }
+    busy(true); $('msg').className = '';
+    K.api('getReport', data).then(function (t) {
+      $('repOut').textContent = K.plain(t);
+      if (send) show('ok', 'Report sent to Telegram.');
+    }).catch(fail).then(function () { busy(false); });
+  }
+
+  K.ready(function () {
+    $('day').addEventListener('change', previewDay);
+    $('sendDay').addEventListener('click', function () {
+      var iso = $('day').value;
+      if (!iso) return;
+      busy(true); $('msg').className = '';
+      K.api('sendSummary', { iso: iso }).then(function (t) {
+        $('dayOut').textContent = K.plain(t); show('ok', 'Summary sent to Telegram.');
+        return loadDays();
+      }).catch(fail).then(function () { busy(false); });
+    });
+    $('prevRange').addEventListener('click', function () { report(false, true); });
+    $('prevLast').addEventListener('click', function () { report(false, false); });
+    $('sendRange').addEventListener('click', function () { report(true, true); });
+    $('sendLast').addEventListener('click', function () { report(true, false); });
+    $('sendUnsent').addEventListener('click', function () {
+      busy(true); $('msg').className = '';
+      K.api('sendUnsent').then(function (r) {
+        show('ok', r.sent ? 'Sent ' + r.sent + ' unsent day(s).' : 'Nothing to send. All completed days are already sent.');
+        return loadDays();
+      }).catch(fail).then(function () { busy(false); });
+    });
+    loadDays().catch(fail);
+  });
+})();
+</script>
+</body>
+</html>

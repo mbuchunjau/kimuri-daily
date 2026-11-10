@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#12513a">
+<title>Kimuri – daily entry</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@800;900&family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div id="lock">
+  <div class="lockbox">
+    <h1 class="wordmark">KIMURI</h1>
+    <p>Enter the PIN to open the till sheet.</p>
+    <input type="password" id="pin" inputmode="numeric" autocomplete="current-password" aria-label="PIN">
+    <button id="unlock" type="button">Open</button>
+    <div class="err" id="lockErr" role="alert"></div>
+  </div>
+</div>
+
+<div class="awning-wrap"><div class="awning" aria-hidden="true"></div></div>
+
+<div class="masthead">
+  <div>
+    <h1 class="wordmark">KIMURI</h1>
+    <p class="tagline">Evening till and stock sheet</p>
+  </div>
+  <div class="datechip" id="chip"></div>
+</div>
+
+<nav class="nav" aria-label="Pages">
+  <a href="/" aria-current="page">Daily entry</a>
+  <a href="/summary">Summaries</a>
+</nav>
+
+<main>
+  <div class="datebar">
+    <div class="grow">
+      <label class="f" for="date">Date</label>
+      <input type="date" id="date">
+    </div>
+    <button class="small" id="loadBtn" type="button">Load</button>
+  </div>
+  <div class="note" id="dayNote"></div>
+
+  <div id="body"><div class="loading">Opening the sheet…</div></div>
+
+  <div id="msg" role="status"></div>
+  <div id="resultBox"></div>
+</main>
+
+<div class="bar">
+  <div class="bar-in">
+    <button type="button" id="saveBtn">Save</button>
+    <button type="button" id="sendBtn" class="primary">Save and send summary</button>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+<script>
+(function () {
+  var K = window.Kimuri, esc = K.esc, state = { items: [] };
+  var $ = function (id) { return document.getElementById(id); };
+
+  function nv(v) { return (v === '' || v == null) ? '' : v; }
+  function toNum(v) { var n = parseFloat(v); return isNaN(n) ? 0 : n; }
+  function show(kind, text) {
+    var m = $('msg'); m.className = kind; m.textContent = text;
+    if (kind === 'ok') setTimeout(function () { if (m.textContent === text) m.className = ''; }, 7000);
+  }
+  function busy(on) { ['saveBtn', 'sendBtn', 'loadBtn'].forEach(function (id) { $(id).disabled = on; }); }
+  function chip() { var v = $('date').value; $('chip').textContent = v ? K.niceDate(v) : ''; }
+
+  function field(id, label, value, cls, extra) {
+    return '<div><label class="f" for="' + id + '">' + label + '</label>' +
+      '<input type="number" inputmode="decimal" step="any" id="' + id + '" class="' + (cls || '') + '" value="' + esc(nv(value)) + '" ' + (extra || '') + '></div>';
+  }
+
+  function render(data) {
+    state.items = data.items;
+    var carried = !data.exists;
+    var h = '<h2>Stock</h2>';
+    data.items.forEach(function (it, i) {
+      var kg = /^(BEEF|PORK|BONES)$/.test(it.item) ? ' kg' : '';
+      h += '<div class="item" id="card' + i + '">' +
+        '<div class="item-head"><strong>' + esc(it.item) + '</strong><span>' + esc(it.price) + ' each' + kg + '</span></div>' +
+        '<div class="grid">' +
+          field('open' + i, 'New stock in', it.open, '', 'min="0"') +
+          field('bal' + i, 'From yesterday', it.bal, (carried && it.bal !== '') ? 'carried' : '', 'min="0"') +
+          field('util' + i, 'Utilities', it.util, '', 'min="0"') +
+          field('close' + i, 'Closing stock', it.close, '', 'min="0"') +
+          '<div class="warn">Closing is higher than new stock plus balance. Check the numbers.</div>' +
+        '</div></div>';
+    });
+    h += '<h2>Cash</h2><div class="panel"><div class="grid">' +
+      field('expenses', 'Expenses', data.expenses, '', 'min="0"') +
+      field('debts', 'Debts', data.debts, '', 'min="0"') +
+      field('mpesa', 'M-Pesa', data.mpesa, '', 'min="0"') +
+      field('cash', 'Cash', data.cash, '', 'min="0"') +
+      '</div></div>' +
+      '<h2>Variances <small>from your count</small></h2><div class="panel"><div class="grid">' +
+      field('beefVar', 'Beef', data.beefVar) +
+      field('kitchenVar', 'Kitchen and pork', data.kitchenVar) +
+      '</div></div>';
+    $('body').innerHTML = h;
+    data.items.forEach(function (it, i) {
+      ['open', 'bal', 'close'].forEach(function (k) { $(k + i).addEventListener('input', function () { check(i); }); });
+      check(i);
+    });
+  }
+
+  function check(i) {
+    var total = toNum($('open' + i).value) + toNum($('bal' + i).value);
+    var close = $('close' + i).value;
+    $('card' + i).classList.toggle('bad', close !== '' && toNum(close) > total + 0.0001);
+  }
+
+  function collect() {
+    return {
+      iso: $('date').value,
+      items: state.items.map(function (it, i) {
+        return { item: it.item, open: $('open' + i).value, bal: $('bal' + i).value,
+                 util: $('util' + i).value, close: $('close' + i).value };
+      }),
+      expenses: $('expenses').value, debts: $('debts').value,
+      mpesa: $('mpesa').value, cash: $('cash').value,
+      beefVar: $('beefVar').value, kitchenVar: $('kitchenVar').value
+    };
+  }
+
+  function renderResult(res, sent) {
+    var r = res.result, h;
+    if (!r.complete) {
+      h = '<div class="result"><div class="status pending"><div><div class="lbl">Saved</div><div class="big">Incomplete</div></div></div>' +
+          '<div class="rows"><div><span>Total sales and cash at hand are not filled in yet.</span><span></span></div></div></div>';
+    } else {
+      var cls = r.variance < 0 ? 'short' : r.variance > 0 ? 'over' : '';
+      var label = r.variance < 0 ? 'Short' : r.variance > 0 ? 'Over' : 'Balanced';
+      var amount = r.variance === 0 ? '0' : K.fmt(Math.abs(r.variance));
+      h = '<div class="result"><div class="status ' + cls + '"><div><div class="lbl">' + (sent ? 'Sent to Telegram' : 'Saved') + '</div><div class="big">' + label + ' ' + amount + '</div></div></div>' +
+        '<div class="rows">' +
+        '<div><span>Total sales</span><span>' + K.fmt(r.sales) + '</span></div>' +
+        '<div><span>Expenses</span><span>' + K.fmt(r.expenses) + '</span></div>' +
+        '<div><span>Expected cash</span><span>' + K.fmt(r.expected) + '</span></div>' +
+        '<div><span>Cash at hand</span><span>' + K.fmt(r.cashAtHand) + '</span></div></div>' +
+        '<details><summary>Full summary</summary><pre class="text">' + esc(K.plain(res.summary)) + '</pre></details></div>';
+    }
+    $('resultBox').innerHTML = h;
+    $('resultBox').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function load() {
+    var iso = $('date').value; chip();
+    if (!iso) { show('err', 'Pick a date first.'); return; }
+    busy(true); $('msg').className = ''; $('resultBox').innerHTML = '';
+    $('body').innerHTML = '<div class="loading">Opening the sheet…</div>';
+    K.api('getDay', { iso: iso }).then(function (d) {
+      render(d);
+      $('dayNote').innerHTML = d.exists ? 'Editing the saved sheet for this date.'
+        : d.prevName ? 'New day. “From yesterday” is filled from the <b>' + esc(d.prevName) + '</b> closing stock.'
+        : 'New day. No earlier sheet was found, so balances are empty.';
+    }).catch(function (e) {
+      $('body').innerHTML = ''; show('err', 'Could not load: ' + e.message);
+    }).then(function () { busy(false); });
+  }
+
+  function save(send) {
+    var payload = collect();
+    if (!payload.iso) { show('err', 'Pick a date first.'); return; }
+    busy(true); $('msg').className = '';
+    var saved = false, res;
+    K.api('saveDay', payload).then(function (r) {
+      saved = true; res = r;
+      if (!send) { show('ok', r.created ? 'New sheet created and saved.' : 'Saved to the sheet.'); renderResult(r, false); return; }
+      return K.api('sendSummary', { iso: payload.iso }).then(function () {
+        show('ok', 'Saved and summary sent.'); renderResult(res, true);
+      });
+    }).catch(function (e) {
+      if (saved && res) renderResult(res, false);
+      show('err', (saved ? 'Saved, but the summary was not sent: ' : 'Could not save: ') + e.message);
+    }).then(function () { busy(false); });
+  }
+
+  K.ready(function () {
+    $('date').value = K.todayIso();
+    $('loadBtn').addEventListener('click', load);
+    $('date').addEventListener('change', load);
+    $('saveBtn').addEventListener('click', function () { save(false); });
+    $('sendBtn').addEventListener('click', function () { save(true); });
+    load();
+  });
+})();
+</script>
+</body>
+</html>
